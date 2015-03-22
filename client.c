@@ -91,14 +91,40 @@ int main(int argc, char *argv[])
 	{
 		if(prot == 1)
 		{
-			if( sendall(sock, &c, 1, 0) < 0 ||
-				sendall(sock, "\\0", 2, 0) < 0 ||
+			if(sendall(sock, &c, 1, 0) < 0)
+			{
+				fprintf(stderr, "server fault: socket\n");
+				exit(1);
+			}
+			if(c == '\\' && sendall(sock, "\\", 1, 0) < 0)
+			{
+				fprintf(stderr, "server fault: socket\n");
+				exit(1);
+			}
+			if( sendall(sock, "\\0", 2, 0) < 0 ||
 				recvexact(sock, buffer, 2, 0) < 0)
 			{
 				fprintf(stderr, "server fault: socket\n");
 				exit(1);
 			}
-			if(buffer[0] != '\\' || buffer[1] != '0')
+			if(buffer[0] == '\\')
+			{
+				if(buffer[1] == '\\')
+				{
+					write(fileno(stdout), "\\", 1);
+					if(recvexact(sock, buffer, 2, 0) < 0)
+					{
+						fprintf(stderr, "server fault: socket\n");
+						exit(1);
+					}
+				}
+				else if(buffer[1] != '0')
+				{
+					fprintf(stderr, "server fault: escape\n");
+					exit(1);
+				}
+			}
+			else
 			{
 				write(fileno(stdout), buffer, 1);
 				if(recvexact(sock, buffer, 1, 0) < 0)
