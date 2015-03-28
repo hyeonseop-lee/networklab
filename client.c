@@ -8,15 +8,103 @@
 
 #include "common.h"
 
+#define BUFSIZE (0x1000)
+
 extern char *optarg;
+
+void serve(int sock, int prot)
+{
+	int length, i, j;
+	uint32_t number;
+	char buffer[BUFSIZE];
+	for(; 0 < (length = read(fileno(stdin), &buffer, BUFSIZE)); )
+	{
+		if(prot == 1)
+		{
+			for(i = 0; i < length; i++)
+			{
+				for(j = i; j < length && buffer[j] != '\\'; j++);
+				if(sendall(sock, buffer + i, j - i, 0) < 0 || (j < length && sendall(sock, "\\\\", 2, 0) < 0))
+				{
+					fprintf(stderr, "server fault: socket\n");
+					exit(1);
+				}
+				i = j;
+			}
+			if(sendall(sock, "\\0", 2, 0) < 0)
+			{
+				fprintf(stderr, "server fault: socket\n");
+				exit(1);
+			}
+			for(length = 0; 0 <= (i = recvexact(sock, buffer + length, 1, 0)); length++)
+			{
+				if(buffer[length] == '\\')
+				{
+					if(recvexact(sock, buffer + length + 1, 1, 0) < 0)
+					{
+						fprintf(stderr, "server fault: socket\n");
+						exit(1);
+					}
+					if(buffer[length + 1] == '0')
+					{
+						break;
+					}
+					else if(buffer[length + 1] != '\\')
+					{
+						fprintf(stderr, "server fault: escape\n");
+						exit(1);
+					}
+				}
+				if(write(fileno(stdout), buffer + length, 1) < 0)
+				{
+					perror("write");
+					exit(1);
+				}
+			}
+			if(i < 0)
+			{
+				fprintf(stderr, "server fault: socket\n");
+				exit(1);
+			}
+		}
+		else
+		{
+			number = htonl(length);
+			if(sendall(sock, &number, 4, 0) < 0 || sendall(sock, buffer, length, 0) < 0)
+			{
+				fprintf(stderr, "server fault: socket\n");
+				exit(1);
+			}
+			if(recvexact(sock, &number, 4, 0) < 0)
+			{
+				fprintf(stderr, "server fault: socket\n");
+				exit(1);
+			}
+			length = ntohl(number);
+			if(recvexact(sock, buffer, length, 0) < 0)
+			{
+				fprintf(stderr, "server fault: socket\n");
+				exit(1);
+			}
+			if(write(fileno(stdout), buffer, length) < 0)
+			{
+				perror("write");
+				exit(1);
+			}
+		}
+	}
+	if(length < 0)
+	{
+		perror("read");
+		exit(1);
+	}
+}
 
 int main(int argc, char *argv[])
 {
 	int sock;
 	uint16_t port, prot;
-	uint32_t number;
 	char c;
-	char buffer[4];
 	char *argv_host = NULL, *argv_port = NULL, *argv_prot = NULL, *host;
 	struct sockaddr_in addr;
 	struct neghdr neg;
@@ -56,7 +144,7 @@ int main(int argc, char *argv[])
 	}
 	memset(&addr, 0, sizeof(struct sockaddr_in));
 	addr.sin_family = AF_INET;
-	addr.sin_port = htons((uint16_t)port);
+	addr.sin_port = htons(port);
 	addr.sin_addr.s_addr = inet_addr(host);
 	if(connect(sock, (const struct sockaddr *)&addr, sizeof(struct sockaddr_in)) < 0)
 	{
@@ -87,74 +175,7 @@ int main(int argc, char *argv[])
 		fprintf(stderr, "server fault: socket\n");
 		exit(1);
 	}
-	for(; read(fileno(stdin), &c, 1); )
-	{
-		if(prot == 1)
-		{
-			if(sendall(sock, &c, 1, 0) < 0)
-			{
-				fprintf(stderr, "server fault: socket\n");
-				exit(1);
-			}
-			if(c == '\\' && sendall(sock, "\\", 1, 0) < 0)
-			{
-				fprintf(stderr, "server fault: socket\n");
-				exit(1);
-			}
-			if( sendall(sock, "\\0", 2, 0) < 0 ||
-				recvexact(sock, buffer, 2, 0) < 0)
-			{
-				fprintf(stderr, "server fault: socket\n");
-				exit(1);
-			}
-			if(buffer[0] == '\\')
-			{
-				if(buffer[1] == '\\')
-				{
-					write(fileno(stdout), "\\", 1);
-					if(recvexact(sock, buffer, 2, 0) < 0)
-					{
-						fprintf(stderr, "server fault: socket\n");
-						exit(1);
-					}
-				}
-				else if(buffer[1] != '0')
-				{
-					fprintf(stderr, "server fault: escape\n");
-					exit(1);
-				}
-			}
-			else
-			{
-				write(fileno(stdout), buffer, 1);
-				if(recvexact(sock, buffer, 1, 0) < 0)
-				{
-					fprintf(stderr, "server fault: socket\n");
-					exit(1);
-				}
-			}
-		}
-		if(prot == 2)
-		{
-			number = htonl(1);
-			if( sendall(sock, &number, 4, 0) < 0 ||
-				sendall(sock, &c, 1, 0) < 0 ||
-				recvexact(sock, &number, 4, 0) < 0)
-			{
-				fprintf(stderr, "server fault: socket\n");
-				exit(1);
-			}
-			if(ntohl(number))
-			{
-				if(recvexact(sock, buffer, 1, 0) < 0)
-				{
-					fprintf(stderr, "server fault: socket\n");
-					exit(1);
-				}
-				write(fileno(stdout), buffer, 1);
-			}
-		}
-	}
+	serve(sock, prot);
 	close(sock);
 	return 0;
 }
