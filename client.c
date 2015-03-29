@@ -17,6 +17,7 @@ void serve(int sock, int prot)
 	int length, i, j;
 	uint32_t number;
 	char buffer[BUFSIZE];
+
 	for(; 0 < (length = read(fileno(stdin), &buffer, BUFSIZE)); )
 	{
 		if(prot == 1)
@@ -108,6 +109,7 @@ int main(int argc, char *argv[])
 	char *argv_host = NULL, *argv_port = NULL, *argv_prot = NULL, *host;
 	struct sockaddr_in addr;
 	struct neghdr neg;
+
 	while((c = getopt(argc, argv, "h:p:m:")) != -1)
 	{
 		switch(c)
@@ -175,7 +177,9 @@ int main(int argc, char *argv[])
 		fprintf(stderr, "server fault: socket\n");
 		exit(1);
 	}
+
 	serve(sock, prot);
 	close(sock);
+
 	return 0;
 }

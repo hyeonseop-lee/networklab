@@ -26,6 +26,8 @@ struct session
 	struct list_elem elem;
 };
 
+extern char *optarg;
+
 void session_append(struct session *session, void *buffer, unsigned int size)
 {
 	if(session->wbuf)
@@ -58,14 +60,15 @@ void session_flush(struct session *session, void *buffer, unsigned int size)
 	}
 }
 
-struct session *session_close(struct session *session)
+void session_close(struct session *session, struct list_elem **it)
 {
 	struct session *prev;
+
 	if(close(session->fd) < 0)
 	{
 		perror("close");
 	}
-	prev = list_entry(list_prev(&session->elem), struct session, elem);
+	*it = list_prev(&session->elem);
 	if(session->rbuf)
 	{
 		free(session->rbuf);
@@ -76,12 +79,12 @@ struct session *session_close(struct session *session)
 	}
 	list_remove(&session->elem);
 	free(session);
-	return prev;
 }
 
-struct session *serve_accept(struct session *session, fd_set *set)
+int serve_accept(struct session *session, fd_set *set)
 {
 	struct neghdr neg;
+
 	session->prot = 0;
 	session->trans_id = rand();
 	session->rbuf = session->wbuf = NULL;
@@ -98,20 +101,22 @@ struct session *serve_accept(struct session *session, fd_set *set)
 	FD_SET(session->fd, &set[FDS_WRITE]);
 	FD_SET(session->fd, &set[FDS_ERROR]);
 
-	return session;
+	return 0;
 }
 
-struct session *serve_read(struct session *session, fd_set *set)
+int serve_read(struct session *session, fd_set *set, struct list_elem **it)
 {
 	int i, j, len;
 	unsigned int size;
 	char *memory;
 	char buffer[BUFSIZE];
 	struct neghdr *neg;
+
 	if((len = recv(session->fd, buffer, BUFSIZE, 0)) < 0)
 	{
 		perror("recv");
-		return session_close(session);
+		session_close(session, it);
+		return -1;
 	}
 	if(len)
 	{
@@ -132,7 +137,8 @@ struct session *serve_read(struct session *session, fd_set *set)
 		if(len == 0)
 		{
 			fprintf(stderr, "client fault: socket\n");
-			return session_close(session);
+			session_close(session, it);
+			return -1;
 		}
 
 		if(sizeof(struct neghdr) <= session->rbsize)
@@ -141,13 +147,15 @@ struct session *serve_read(struct session *session, fd_set *set)
 			if(neg->op != 1 || (neg->proto != 1 && neg->proto != 2) || neg->trans_id != session->trans_id)
 			{
 				fprintf(stderr, "client fault: protocol\n");
-				return session_close(session);
+				session_close(session, it);
+				return -1;
 			}
 			session->prot = neg->proto;
 			if(checksum(neg, sizeof(struct neghdr)) != 0xffff)
 			{
 				fprintf(stderr, "client fault: checksum\n");
-				return session_close(session);
+				session_close(session, it);
+				return -1;
 			}
 			session_flush(session, buffer + len - (session->rbsize - sizeof(struct neghdr)), session->rbsize - sizeof(struct neghdr));
 		}
@@ -178,7 +186,8 @@ struct session *serve_read(struct session *session, fd_set *set)
 					else
 					{
 						fprintf(stderr, "client fault: escape\n");
-						return session_close(session);
+						session_close(session, it);
+						return -1;
 					}
 				}
 				else
@@ -228,11 +237,13 @@ struct session *serve_read(struct session *session, fd_set *set)
 		if(session->rbuf)
 		{
 			fprintf(stderr, "client fault: socket\n");
-			return session_close(session);
+			session_close(session, it);
+			return -1;
 		}
 		if(session->wbuf == NULL)
 		{
-			return session_close(session);
+			session_close(session, it);
+			return -1;
 		}
 		session->eof = 1;
 	}
@@ -246,18 +257,20 @@ struct session *serve_read(struct session *session, fd_set *set)
 	}
 	FD_SET(session->fd, &set[FDS_ERROR]);
 	
-	return session;
+	return 0;
 }
 
-struct session *serve_write(struct session *session, fd_set *set)
+int serve_write(struct session *session, fd_set *set, struct list_elem **it)
 {
 	int len;
 	char *buffer;
 	struct session *prev;
+
 	if((len = send(session->fd, session->wbuf, session->wbsize, 0)) < 0)
 	{
 		perror("send");
-		return session_close(session);
+		session_close(session, it);
+		return -1;
 	}
 	if(len < session->wbsize)
 	{
@@ -275,21 +288,24 @@ struct session *serve_write(struct session *session, fd_set *set)
 		session->wbsize = 0;
 		if(session->eof)
 		{
-			return session_close(session);
+			session_close(session, it);
+			return -1;
 		}
 		FD_SET(session->fd, &set[FDS_READ]);
 	}
 	FD_SET(session->fd, &set[FDS_ERROR]);
 
-	return session;
+	return 0;
 }
 
-struct session *serve_error(struct session *session, fd_set *set)
+int serve_error(struct session *session, fd_set *set, struct list_elem **it)
 {
 	struct session *prev;
-	printf("%3d: error\n", session->fd);
+
 	fprintf(stderr, "client fault: socket\n");
-	return session_close(session);
+
+	session_close(session, it);
+	return -1;
 }
 
 int main(int argc, char *argv[])
@@ -303,6 +319,7 @@ int main(int argc, char *argv[])
 	struct list_elem *it;
 	struct session *now;
 	fd_set set[3], buf[3];
+
 	while((c = getopt(argc, argv, "p:")) != -1)
 	{
 		switch(c)
@@ -338,6 +355,7 @@ int main(int argc, char *argv[])
 		perror("listen");
 		exit(1);
 	}
+
 	srand((unsigned int)time(NULL));
 	list_init(&sessions);
 	FD_ZERO(&set[FDS_READ]);
@@ -358,7 +376,6 @@ int main(int argc, char *argv[])
 		FD_ZERO(&buf[FDS_ERROR]);
 		if(FD_ISSET(sock, &set[FDS_ERROR]))
 		{
-			printf("%3d: error\n", sock);
 			exit(1);
 		}
 		if(FD_ISSET(sock, &set[FDS_READ]))
@@ -382,23 +399,23 @@ int main(int argc, char *argv[])
 		for(it = list_begin(&sessions); it != list_end(&sessions); it = list_next(it))
 		{
 			now = list_entry(it, struct session, elem);
-			if(FD_ISSET(now->fd, &set[FDS_ERROR]))
+			if(FD_ISSET(now->fd, &set[FDS_ERROR]) && serve_error(now, buf, &it) < 0)
 			{
-				now = serve_error(now, buf);
+				continue;
 			}
-			if(it == &now->elem && FD_ISSET(now->fd, &set[FDS_WRITE]))
+			if(FD_ISSET(now->fd, &set[FDS_WRITE]) && serve_write(now, buf, &it) < 0)
 			{
-				now = serve_write(now, buf);
+				continue;
 			}
-			if(it == &now->elem && FD_ISSET(now->fd, &set[FDS_READ]))
+			if(FD_ISSET(now->fd, &set[FDS_READ]) && serve_read(now, buf, &it) < 0)
 			{
-				now = serve_read(now, buf);
+				continue;
 			}
-			it = &now->elem;
 		}
 		FD_COPY(&buf[FDS_READ], &set[FDS_READ]);
 		FD_COPY(&buf[FDS_WRITE], &set[FDS_WRITE]);
 		FD_COPY(&buf[FDS_ERROR], &set[FDS_ERROR]);
 	}
+
 	return 0;
 }
