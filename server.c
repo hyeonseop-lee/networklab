@@ -81,7 +81,7 @@ void session_close(struct session *session, struct list_elem **it)
 	free(session);
 }
 
-int serve_accept(struct session *session, fd_set *set)
+void serve_accept(struct session *session, fd_set *set)
 {
 	struct neghdr neg;
 
@@ -100,11 +100,9 @@ int serve_accept(struct session *session, fd_set *set)
 	session_append(session, &neg, sizeof(struct neghdr));
 	FD_SET(session->fd, &set[FDS_WRITE]);
 	FD_SET(session->fd, &set[FDS_ERROR]);
-
-	return 0;
 }
 
-int serve_read(struct session *session, fd_set *set, struct list_elem **it)
+void serve_read(struct session *session, fd_set *set, struct list_elem **it)
 {
 	int i, j, len;
 	unsigned int size;
@@ -116,7 +114,7 @@ int serve_read(struct session *session, fd_set *set, struct list_elem **it)
 	{
 		perror("recv");
 		session_close(session, it);
-		return -1;
+		return;
 	}
 	if(len)
 	{
@@ -138,7 +136,7 @@ int serve_read(struct session *session, fd_set *set, struct list_elem **it)
 		{
 			fprintf(stderr, "client fault: socket\n");
 			session_close(session, it);
-			return -1;
+			return;
 		}
 
 		if(sizeof(struct neghdr) <= session->rbsize)
@@ -148,14 +146,14 @@ int serve_read(struct session *session, fd_set *set, struct list_elem **it)
 			{
 				fprintf(stderr, "client fault: protocol\n");
 				session_close(session, it);
-				return -1;
+				return;
 			}
 			session->prot = neg->proto;
 			if(checksum(neg, sizeof(struct neghdr)) != 0xffff)
 			{
 				fprintf(stderr, "client fault: checksum\n");
 				session_close(session, it);
-				return -1;
+				return;
 			}
 			session_flush(session, buffer + len - (session->rbsize - sizeof(struct neghdr)), session->rbsize - sizeof(struct neghdr));
 		}
@@ -187,7 +185,7 @@ int serve_read(struct session *session, fd_set *set, struct list_elem **it)
 					{
 						fprintf(stderr, "client fault: escape\n");
 						session_close(session, it);
-						return -1;
+						return;
 					}
 				}
 				else
@@ -238,12 +236,12 @@ int serve_read(struct session *session, fd_set *set, struct list_elem **it)
 		{
 			fprintf(stderr, "client fault: socket\n");
 			session_close(session, it);
-			return -1;
+			return;
 		}
 		if(session->wbuf == NULL)
 		{
 			session_close(session, it);
-			return -1;
+			return;
 		}
 		session->eof = 1;
 	}
@@ -256,11 +254,9 @@ int serve_read(struct session *session, fd_set *set, struct list_elem **it)
 		FD_SET(session->fd, &set[FDS_WRITE]);
 	}
 	FD_SET(session->fd, &set[FDS_ERROR]);
-	
-	return 0;
 }
 
-int serve_write(struct session *session, fd_set *set, struct list_elem **it)
+void serve_write(struct session *session, fd_set *set, struct list_elem **it)
 {
 	int len;
 	char *buffer;
@@ -270,7 +266,7 @@ int serve_write(struct session *session, fd_set *set, struct list_elem **it)
 	{
 		perror("send");
 		session_close(session, it);
-		return -1;
+		return;
 	}
 	if(len < session->wbsize)
 	{
@@ -289,23 +285,17 @@ int serve_write(struct session *session, fd_set *set, struct list_elem **it)
 		if(session->eof)
 		{
 			session_close(session, it);
-			return -1;
+			return;
 		}
 		FD_SET(session->fd, &set[FDS_READ]);
 	}
 	FD_SET(session->fd, &set[FDS_ERROR]);
-
-	return 0;
 }
 
-int serve_error(struct session *session, fd_set *set, struct list_elem **it)
+void serve_error(struct session *session, fd_set *set, struct list_elem **it)
 {
-	struct session *prev;
-
 	fprintf(stderr, "client fault: socket\n");
-
 	session_close(session, it);
-	return -1;
 }
 
 int main(int argc, char *argv[])
@@ -399,16 +389,19 @@ int main(int argc, char *argv[])
 		for(it = list_begin(&sessions); it != list_end(&sessions); it = list_next(it))
 		{
 			now = list_entry(it, struct session, elem);
-			if(FD_ISSET(now->fd, &set[st][FDS_ERROR]) && serve_error(now, set[st ^ 1], &it) < 0)
+			if(FD_ISSET(now->fd, &set[st][FDS_ERROR]))
 			{
+				serve_error(now, set[st ^ 1], &it);
 				continue;
 			}
-			if(FD_ISSET(now->fd, &set[st][FDS_WRITE]) && serve_write(now, set[st ^ 1], &it) < 0)
+			if(FD_ISSET(now->fd, &set[st][FDS_WRITE]))
 			{
+				serve_write(now, set[st ^ 1], &it);
 				continue;
 			}
-			if(FD_ISSET(now->fd, &set[st][FDS_READ]) && serve_read(now, set[st ^ 1], &it) < 0)
+			if(FD_ISSET(now->fd, &set[st][FDS_READ]))
 			{
+				serve_read(now, set[st ^ 1], &it);
 				continue;
 			}
 		}
