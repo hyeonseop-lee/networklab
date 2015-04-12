@@ -310,7 +310,7 @@ int serve_error(struct session *session, fd_set *set, struct list_elem **it)
 
 int main(int argc, char *argv[])
 {
-	int sock, nfds, fd;
+	int sock, nfds, fd, st;
 	uint16_t port;
 	char c;
 	char *argv_port = NULL;
@@ -318,7 +318,7 @@ int main(int argc, char *argv[])
 	struct list sessions;
 	struct list_elem *it;
 	struct session *now;
-	fd_set set[3], buf[3];
+	fd_set set[2][3];
 
 	while((c = getopt(argc, argv, "p:")) != -1)
 	{
@@ -358,27 +358,27 @@ int main(int argc, char *argv[])
 
 	srand((unsigned int)time(NULL));
 	list_init(&sessions);
-	FD_ZERO(&set[FDS_READ]);
-	FD_ZERO(&set[FDS_WRITE]);
-	FD_ZERO(&set[FDS_ERROR]);
+	FD_ZERO(&set[0][FDS_READ]);
+	FD_ZERO(&set[0][FDS_WRITE]);
+	FD_ZERO(&set[0][FDS_ERROR]);
 	nfds = sock + 1;
-	for(; ; )
+	for(st = 0; ; st ^= 1)
 	{
-		FD_SET(sock, &set[FDS_READ]);
-		FD_SET(sock, &set[FDS_ERROR]);
-		if(select(nfds, &set[FDS_READ], &set[FDS_WRITE], &set[FDS_ERROR], NULL) < 0)
+		FD_SET(sock, &set[st][FDS_READ]);
+		FD_SET(sock, &set[st][FDS_ERROR]);
+		if(select(nfds, &set[st][FDS_READ], &set[st][FDS_WRITE], &set[st][FDS_ERROR], NULL) < 0)
 		{
 			perror("select");
 			exit(1);
 		}
-		FD_ZERO(&buf[FDS_READ]);
-		FD_ZERO(&buf[FDS_WRITE]);
-		FD_ZERO(&buf[FDS_ERROR]);
-		if(FD_ISSET(sock, &set[FDS_ERROR]))
+		FD_ZERO(&set[st ^ 1][FDS_READ]);
+		FD_ZERO(&set[st ^ 1][FDS_WRITE]);
+		FD_ZERO(&set[st ^ 1][FDS_ERROR]);
+		if(FD_ISSET(sock, &set[st][FDS_ERROR]))
 		{
 			exit(1);
 		}
-		if(FD_ISSET(sock, &set[FDS_READ]))
+		if(FD_ISSET(sock, &set[st][FDS_READ]))
 		{
 			if((fd = accept(sock, NULL, NULL)) < 0)
 			{
@@ -393,28 +393,25 @@ int main(int argc, char *argv[])
 					nfds = fd + 1;
 				}
 				list_insert(&sessions, &now->elem);
-				serve_accept(now, buf);
+				serve_accept(now, set[st ^ 1]);
 			}
 		}
 		for(it = list_begin(&sessions); it != list_end(&sessions); it = list_next(it))
 		{
 			now = list_entry(it, struct session, elem);
-			if(FD_ISSET(now->fd, &set[FDS_ERROR]) && serve_error(now, buf, &it) < 0)
+			if(FD_ISSET(now->fd, &set[st][FDS_ERROR]) && serve_error(now, set[st ^ 1], &it) < 0)
 			{
 				continue;
 			}
-			if(FD_ISSET(now->fd, &set[FDS_WRITE]) && serve_write(now, buf, &it) < 0)
+			if(FD_ISSET(now->fd, &set[st][FDS_WRITE]) && serve_write(now, set[st ^ 1], &it) < 0)
 			{
 				continue;
 			}
-			if(FD_ISSET(now->fd, &set[FDS_READ]) && serve_read(now, buf, &it) < 0)
+			if(FD_ISSET(now->fd, &set[st][FDS_READ]) && serve_read(now, set[st ^ 1], &it) < 0)
 			{
 				continue;
 			}
 		}
-		FD_COPY(&buf[FDS_READ], &set[FDS_READ]);
-		FD_COPY(&buf[FDS_WRITE], &set[FDS_WRITE]);
-		FD_COPY(&buf[FDS_ERROR], &set[FDS_ERROR]);
 	}
 
 	return 0;
