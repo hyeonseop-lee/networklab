@@ -37,35 +37,58 @@ void serve(int sock, int prot)
 				fprintf(stderr, "server fault: socket\n");
 				exit(1);
 			}
-			for(length = 0; 0 <= (i = recvexact(sock, buffer + length, 1, 0)); length++)
+			for(; ; )
 			{
-				if(buffer[length] == '\\')
+				for(i = 0, length = recv(sock, buffer, BUFSIZE - 1, 0); i < length; i++)
 				{
-					if(recvexact(sock, buffer + length + 1, 1, 0) < 0)
+					for(j = i; j < length && buffer[j] != '\\'; j++);
+					if(write(fileno(stdout), buffer + i, j - i) < 0)
+					{
+						perror("write");
+						exit(1);
+					}
+					if(j < length)
+					{
+						if(j + 1 == length)
+						{
+							if(recvexact(sock, buffer + length, 1, 0) < 0)
+							{
+								fprintf(stderr, "server fault: socket\n");
+								exit(1);
+							}
+							length++;
+						}
+						if(buffer[j + 1] == '0')
+						{
+							i = j;
+							break;
+						}
+						else if(buffer[j + 1] =='\\')
+						{
+							if(write(fileno(stdout), "\\", 1) < 0)
+							{
+								perror("write");
+								exit(1);
+							}
+							j++;
+						}
+						else
+						{
+							fprintf(stderr, "server fault: escape\n");
+							exit(1);
+						}
+					}
+					i = j;
+				}
+				if(i < length)
+				{
+					if(i + 2 < length)
 					{
 						fprintf(stderr, "server fault: socket\n");
 						exit(1);
 					}
-					if(buffer[length + 1] == '0')
-					{
-						break;
-					}
-					else if(buffer[length + 1] != '\\')
-					{
-						fprintf(stderr, "server fault: escape\n");
-						exit(1);
-					}
+					break;
 				}
-				if(write(fileno(stdout), buffer + length, 1) < 0)
-				{
-					perror("write");
-					exit(1);
-				}
-			}
-			if(i < 0)
-			{
-				fprintf(stderr, "server fault: socket\n");
-				exit(1);
 			}
 		}
 		else
