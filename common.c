@@ -10,7 +10,7 @@ int recvexact(int socket, void *buffer, size_t length, int flags)
 	int now, result;
 	for(now = 0; now < length; )
 	{
-		if((result = recv(socket, buffer + now, length, flags)) < 0)
+		if((result = recv(socket, buffer + now, length - now, flags)) < 0)
 		{
 			perror("recv");
 			exit(1);
@@ -29,7 +29,7 @@ int sendall(int socket, void *buffer, size_t length, int flags)
 	int now, result;
 	for(now = 0; now < length; )
 	{
-		if((result = send(socket, buffer + now, length, flags)) < 0)
+		if((result = send(socket, buffer + now, length - now, flags)) < 0)
 		{
 			perror("send");
 			exit(1);
